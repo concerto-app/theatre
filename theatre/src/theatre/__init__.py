@@ -1,0 +1,1 @@
+from theatre.resources import *

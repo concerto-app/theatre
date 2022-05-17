@@ -1,0 +1,9 @@
+*
+!theatre/src/**
+!theatre/tests/**
+!theatre/pyproject.toml
+!theatre/poetry.lock
+!theatre/LICENSE
+!theatre/README.md
+!environment.yml
+!requirements.txt
