@@ -16,6 +16,9 @@ packages = [{ include = "theatre", from = "theatre/src" }]
 [tool.poetry.dependencies]
 python = "^3.9"
 typer = { version = "^0.4", extras = ["all"] }
+starlite = "^1.3"
+uvicorn = "^0.17"
+aiortc = "^1.3"
 
 # dev
 
