@@ -5,17 +5,26 @@ This module provides basic CLI entrypoint.
 """
 
 import typer
+import uvicorn
 
-cli = typer.Typer()  # this is actually callable and thus can be an entry point
+from theatre.app import app
+from theatre.config import config
+
+cli = typer.Typer()
 
 
 @cli.command()
-def main(x: int = typer.Option(default=1, help="Dummy argument.")) -> None:
+def main(
+    host: str = typer.Option(
+        default="0.0.0.0", help="Host to run the server on"
+    ),
+    port: int = typer.Option(
+        default=config.port, help="Port to run the server on"
+    ),
+):
     """Command line interface for theatre."""
-
-    typer.echo(x)  # typer.echo instead of print, because it's better
+    uvicorn.run(app, host=host, port=port)
 
 
 if __name__ == "__main__":
-    # entry point for "python -m"
     cli()
