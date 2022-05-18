@@ -65,9 +65,11 @@ class Room(AsyncIOEventEmitter):
         return User(id=user_id, avatar=avatar)
 
     def broadcast(self, user_id: str, data: Union[str, bytes]) -> None:
-        for user_info in self._users.values():
-            if user_info.data.id != user_id:
-                user_info.connection.send(data)
+        for connected_user_id in self._connected_users:
+            if connected_user_id != user_id:
+                user_info = self._users.get(connected_user_id)
+                if user_info is not None:
+                    user_info.connection.send(data)
 
     def handle_data(self, user_id: str, data: Union[str, bytes]) -> None:
         try:
