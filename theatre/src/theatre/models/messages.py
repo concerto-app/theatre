@@ -18,7 +18,7 @@ class IncomingMessage(FrozenModel):
 
 
 class OutgoingAction(FrozenModel):
-    type: Literal["press", "release", "disconnect"]
+    type: Literal["press", "release", "connect", "disconnect"]
     data: Optional[KeyboardActionData] = None
 
 

@@ -94,6 +94,14 @@ class Room(AsyncIOEventEmitter):
         data = outgoing_message.json()
         self.broadcast(user_id, data)
 
+    def handle_connect(self, user_id: str) -> None:
+        outgoing_message = OutgoingMessage(
+            user_id=user_id,
+            action=OutgoingAction(type="connect"),
+        )
+        data = outgoing_message.json()
+        self.broadcast(user_id, data)
+
     def add(self, connection: Connection) -> User:
         user = self.create_user()
 
@@ -106,6 +114,7 @@ class Room(AsyncIOEventEmitter):
         @connection.on("connected")
         def on_connected() -> None:
             self._connected_users.add(user.id)
+            self.handle_connect(user.id)
 
         @connection.on("disconnected")
         def on_disconnected() -> None:
