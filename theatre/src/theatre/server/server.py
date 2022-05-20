@@ -28,15 +28,16 @@ class Server:
             await room.close()
             self.rooms.pop(code, None)
 
-        @room.on("empty")
-        async def on_empty() -> None:
-            await close()
-
         async def timeout() -> None:
             if len(room.users) == 0:
                 await close()
 
-        Timer(60, timeout)
+        timer = Timer(60, timeout)
+
+        @room.on("empty")
+        async def on_empty() -> None:
+            timer.cancel()
+            await close()
 
         self.rooms[code] = room
         return room
