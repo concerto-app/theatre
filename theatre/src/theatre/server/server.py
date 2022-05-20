@@ -1,4 +1,4 @@
-from typing import Dict, Sequence, Tuple
+from typing import Dict, Sequence, Set, Tuple
 
 from theatre.models.data import Code, CodeEntry, Session, User
 from theatre.server.connection import Connection
@@ -50,8 +50,9 @@ class Server:
 
     async def connect(
         self, code: Code, session: Session
-    ) -> Tuple[User, Session]:
+    ) -> Tuple[User, Set[User], Session]:
         room = self.get_room(code)
         connection = await Connection.new(session)
         user = room.add(connection)
-        return user, connection.session
+        connected_users = room.users
+        return user, connected_users, connection.session

@@ -1,4 +1,4 @@
-from typing import Literal, Sequence
+from typing import Dict, Literal, Sequence
 
 from theatre.utils import FrozenModel
 
@@ -26,3 +26,19 @@ class Avatar(FrozenModel):
 class User(FrozenModel):
     id: str
     avatar: Avatar
+
+
+class OutgoingUserMessage(FrozenModel):
+    user: str
+    type: str
+    data: Dict
+
+
+class OutgoingServerMessage(FrozenModel):
+    type: str
+    data: Dict
+
+
+class IncomingUserMessage(FrozenModel):
+    type: str
+    data: Dict

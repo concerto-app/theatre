@@ -15,8 +15,14 @@ class ConnectController(Controller):
     ) -> ConnectResponse:
         try:
             server: Server = state.server
-            user, session = await server.connect(data.code, data.session)
-            return ConnectResponse(user=user, session=session)
+            user, connected_users, session = await server.connect(
+                data.code, data.session
+            )
+            return ConnectResponse(
+                user=user,
+                connected_users=list(connected_users),
+                session=session,
+            )
         except NotEnoughResourcesError:
             raise HTTPException(
                 "Maximum players limit reached",
