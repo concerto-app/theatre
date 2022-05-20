@@ -110,8 +110,15 @@ class Room(AsyncIOEventEmitter):
             if len(self._users) == 0:
                 self.emit("empty")
 
+        async def timeout() -> None:
+            if user.id not in self._connected_users:
+                cleanup()
+
+        timer = Timer(60, timeout)
+
         @connection.on("connected")
         def on_connected() -> None:
+            timer.cancel()
             self._connected_users.add(user.id)
             self.handle_connect(user.id)
 
@@ -123,12 +130,6 @@ class Room(AsyncIOEventEmitter):
         @connection.on("data")
         def on_data(message: Union[bytes, str]) -> None:
             self.handle_data(user.id, message)
-
-        async def timeout() -> None:
-            if user.id not in self._connected_users:
-                cleanup()
-
-        Timer(60, timeout)
 
         self._users[user.id] = UserInfo(data=user, connection=connection)
         return user
