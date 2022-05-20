@@ -1,7 +1,12 @@
 from asyncio import AbstractEventLoop
 from typing import List, Optional, Union
 
-from aiortc import RTCDataChannel, RTCPeerConnection, RTCSessionDescription
+from aiortc import (
+    InvalidStateError,
+    RTCDataChannel,
+    RTCPeerConnection,
+    RTCSessionDescription,
+)
 from pyee.asyncio import AsyncIOEventEmitter
 
 from theatre.models.data import Session
@@ -19,16 +24,20 @@ class Connection(AsyncIOEventEmitter):
         super().__init__(loop)
         self._peer_connection = peer_connection
 
-        @self._peer_connection.on("connectionstatechange")
-        def on_connectionstatechange() -> None:
-            if self._peer_connection.connectionState in {"connected"}:
-                self.emit("connected")
-            if self._peer_connection.connectionState in {"closed", "failed"}:
-                self.emit("disconnected")
-
         @self._peer_connection.on("datachannel")
         def on_datachannel(channel: RTCDataChannel) -> None:
             self._channels.append(channel)
+
+            if channel.readyState == "open":
+                self.emit("connected")
+
+            @channel.on("open")
+            def on_open() -> None:
+                self.emit("connected")
+
+            @channel.on("close")
+            def on_closing() -> None:
+                self.emit("disconnected")
 
             @channel.on("message")
             def on_message(message: Union[bytes, str]) -> None:
@@ -52,7 +61,10 @@ class Connection(AsyncIOEventEmitter):
 
     def send(self, data: Union[str, bytes]) -> None:
         for channel in self._channels:
-            channel.send(data)
+            try:
+                channel.send(data)
+            except (InvalidStateError, ConnectionError):
+                pass
 
     async def close(self) -> None:
         await self._peer_connection.close()

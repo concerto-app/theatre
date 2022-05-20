@@ -10,12 +10,10 @@ from theatre.constants import AVAILABLE_AVATAR_EMOJI_IDS
 from theatre.models.data import (
     Avatar,
     Emoji,
+    IncomingUserMessage,
+    OutgoingServerMessage,
+    OutgoingUserMessage,
     User,
-)
-from theatre.models.messages import (
-    IncomingMessage,
-    OutgoingAction,
-    OutgoingMessage,
 )
 from theatre.server.connection import Connection
 from theatre.utils import Timer
@@ -36,8 +34,13 @@ class Room(AsyncIOEventEmitter):
     _connected_users: Set[str] = set()
 
     @property
-    def users(self) -> Set[str]:
-        return self._connected_users
+    def users(self) -> Set[User]:
+        users = set()
+        for user_id in self._connected_users:
+            user_data = self.get_user_data(user_id)
+            if user_data is not None:
+                users.add(user_data)
+        return users
 
     def get_user_data(self, user_id: str) -> Optional[User]:
         return self._users[user_id].data
@@ -73,31 +76,27 @@ class Room(AsyncIOEventEmitter):
 
     def handle_data(self, user_id: str, data: Union[str, bytes]) -> None:
         try:
-            incoming_message = IncomingMessage.parse_raw(data)
+            incoming_message = IncomingUserMessage.parse_raw(data)
         except ValidationError:
             return
-        outgoing_message = OutgoingMessage(
-            user_id=user_id,
-            action=OutgoingAction(
-                type=incoming_message.action.type,
-                data=incoming_message.action.data,
-            ),
+        outgoing_message = OutgoingUserMessage(
+            user=user_id,
+            type=incoming_message.type,
+            data=incoming_message.data,
         )
         data = outgoing_message.json()
         self.broadcast(user_id, data)
 
     def handle_disconnect(self, user_id: str) -> None:
-        outgoing_message = OutgoingMessage(
-            user_id=user_id,
-            action=OutgoingAction(type="disconnect"),
+        outgoing_message = OutgoingServerMessage(
+            type="disconnect", data={"user": user_id}
         )
         data = outgoing_message.json()
         self.broadcast(user_id, data)
 
     def handle_connect(self, user_id: str) -> None:
-        outgoing_message = OutgoingMessage(
-            user_id=user_id,
-            action=OutgoingAction(type="connect"),
+        outgoing_message = OutgoingServerMessage(
+            type="connect", data={"user": self.get_user_data(user_id)}
         )
         data = outgoing_message.json()
         self.broadcast(user_id, data)
