@@ -60,10 +60,12 @@ class Connection(AsyncIOEventEmitter):
     def session(self) -> Session:
         return Session(description=self._peer_connection.localDescription.sdp)
 
-    def send(self, data: Union[str, bytes]) -> None:
+    async def send(self, data: Union[str, bytes]) -> None:
         for channel in self._channels:
             try:
                 channel.send(data)
+                await channel.transport._data_channel_flush()
+                await channel.transport._transmit()
             except (InvalidStateError, ConnectionError):
                 pass
 
