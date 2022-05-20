@@ -1,8 +1,8 @@
+import asyncio
 from asyncio import AbstractEventLoop
 from typing import List, Optional, Union
 
 from aiortc import (
-    InvalidStateError,
     RTCDataChannel,
     RTCPeerConnection,
     RTCSessionDescription,
@@ -61,13 +61,17 @@ class Connection(AsyncIOEventEmitter):
         return Session(description=self._peer_connection.localDescription.sdp)
 
     async def send(self, data: Union[str, bytes]) -> None:
-        for channel in self._channels:
-            try:
-                channel.send(data)
-                await channel.transport._data_channel_flush()
-                await channel.transport._transmit()
-            except (InvalidStateError, ConnectionError):
-                pass
+        async def send_to_channel(
+            data: Union[str, bytes], channel: RTCDataChannel
+        ) -> None:
+            channel.send(data)
+            await channel.transport._data_channel_flush()
+            await channel.transport._transmit()
+
+        tasks = [send_to_channel(data, channel) for channel in self._channels]
+
+        if len(tasks) > 0:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def close(self) -> None:
         await self._peer_connection.close()

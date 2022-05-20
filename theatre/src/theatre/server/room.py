@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import random
 import uuid
@@ -90,11 +91,24 @@ class Room(AsyncIOEventEmitter):
         return User(id=user_id, avatar=avatar)
 
     async def broadcast(self, user_id: str, data: Union[str, bytes]) -> None:
-        for connected_user_id in self._connected_users:
-            if connected_user_id != user_id:
-                user_info = self._users.get(connected_user_id)
-                if user_info is not None:
-                    await user_info.connection.send(data)
+        async def send_to_user(
+            data: Union[str, bytes], user_info: UserInfo
+        ) -> None:
+            await user_info.connection.send(data)
+
+        user_infos = [
+            self._users.get(connected_user_id)
+            for connected_user_id in self._connected_users
+            if connected_user_id != user_id
+        ]
+        tasks = [
+            send_to_user(data, user_info)
+            for user_info in user_infos
+            if user_info is not None
+        ]
+
+        if len(tasks) > 0:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def handle_data(self, user_id: str, data: Union[str, bytes]) -> None:
         try:
