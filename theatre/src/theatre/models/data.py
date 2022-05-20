@@ -10,6 +10,9 @@ class Session(FrozenModel):
 class Emoji(FrozenModel):
     id: str
 
+    def __str__(self) -> str:
+        return chr(int(self.id, 16))
+
 
 class CodeEntry(FrozenModel):
     emoji: Emoji

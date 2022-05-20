@@ -1,5 +1,7 @@
+import logging
 import random
 import uuid
+from asyncio import AbstractEventLoop
 from dataclasses import dataclass
 from typing import Dict, Optional, Set, Union
 
@@ -7,8 +9,10 @@ from pydantic import ValidationError
 from pyee.asyncio import AsyncIOEventEmitter
 
 from theatre.constants import AVAILABLE_AVATAR_EMOJI_IDS
+from theatre.log import logger
 from theatre.models.data import (
     Avatar,
+    Code,
     Emoji,
     IncomingUserMessage,
     OutgoingServerMessage,
@@ -23,6 +27,16 @@ class NotEnoughResourcesError(Exception):
     pass
 
 
+class RoomLoggerAdapter(logging.LoggerAdapter):
+    def __init__(self, base_logger, code: Code) -> None:
+        super().__init__(base_logger, {})
+        self.code = code
+
+    def process(self, msg, kwargs):
+        prefix = " ".join([str(entry.emoji) for entry in self.code.entries])
+        return f"[ {prefix} ] {msg}", kwargs
+
+
 @dataclass
 class UserInfo:
     data: User
@@ -30,8 +44,14 @@ class UserInfo:
 
 
 class Room(AsyncIOEventEmitter):
+    _code: Code
     _users: Dict[str, UserInfo] = {}
     _connected_users: Set[str] = set()
+
+    def __init__(self, code: Code, loop: Optional[AbstractEventLoop] = None):
+        super().__init__(loop)
+        self._code = code
+        self._logger = RoomLoggerAdapter(logger, code=code)
 
     @property
     def users(self) -> Set[User]:
@@ -102,6 +122,8 @@ class Room(AsyncIOEventEmitter):
         self.broadcast(user_id, data)
 
     def add(self, connection: Connection) -> User:
+        self._logger.info("New connection.")
+
         user = self.create_user()
 
         def cleanup() -> None:
@@ -112,23 +134,29 @@ class Room(AsyncIOEventEmitter):
 
         async def timeout() -> None:
             if user.id not in self._connected_users:
+                self._logger.info(
+                    f"User {user.avatar.emoji} didn't connect on time."
+                )
                 cleanup()
 
         timer = Timer(60, timeout)
 
         @connection.on("connected")
         def on_connected() -> None:
+            self._logger.info(f"User {user.avatar.emoji} connected.")
             timer.cancel()
             self._connected_users.add(user.id)
             self.handle_connect(user.id)
 
         @connection.on("disconnected")
         def on_disconnected() -> None:
+            self._logger.info(f"User {user.avatar.emoji} disconnected.")
             self.handle_disconnect(user.id)
             cleanup()
 
         @connection.on("data")
         def on_data(message: Union[bytes, str]) -> None:
+            self._logger.info(f"User {user.avatar.emoji} sent message.")
             self.handle_data(user.id, message)
 
         self._users[user.id] = UserInfo(data=user, connection=connection)

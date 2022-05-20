@@ -13,6 +13,9 @@ class InternalCode(FrozenModel):
     def new(cls, code: Code) -> "InternalCode":
         return cls(entries=tuple(code.entries))
 
+    def code(self) -> Code:
+        return Code(entries=list(self.entries))
+
 
 class Server:
     rooms: Dict[InternalCode, Room] = {}
@@ -22,7 +25,7 @@ class Server:
             await room.close()
 
     def create_room(self, code: InternalCode) -> Room:
-        room = Room()
+        room = Room(code.code())
 
         async def close() -> None:
             await room.close()
