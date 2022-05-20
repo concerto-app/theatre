@@ -14,7 +14,7 @@ from theatre.models.data import Session
 
 class Connection(AsyncIOEventEmitter):
     _peer_connection: RTCPeerConnection
-    _channels: List[RTCDataChannel] = []
+    _channels: List[RTCDataChannel]
 
     def __init__(
         self,
@@ -22,6 +22,7 @@ class Connection(AsyncIOEventEmitter):
         loop: Optional[AbstractEventLoop] = None,
     ):
         super().__init__(loop)
+        self._channels = []
         self._peer_connection = peer_connection
 
         @self._peer_connection.on("datachannel")

@@ -18,7 +18,10 @@ class InternalCode(FrozenModel):
 
 
 class Server:
-    rooms: Dict[InternalCode, Room] = {}
+    rooms: Dict[InternalCode, Room]
+
+    def __init__(self) -> None:
+        self.rooms = {}
 
     async def cleanup(self) -> None:
         for room in self.rooms.values():
