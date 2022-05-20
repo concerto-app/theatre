@@ -45,13 +45,15 @@ class UserInfo:
 
 class Room(AsyncIOEventEmitter):
     _code: Code
-    _users: Dict[str, UserInfo] = {}
-    _connected_users: Set[str] = set()
+    _users: Dict[str, UserInfo]
+    _connected_users: Set[str]
 
     def __init__(self, code: Code, loop: Optional[AbstractEventLoop] = None):
         super().__init__(loop)
         self._code = code
         self._logger = RoomLoggerAdapter(logger, code=code)
+        self._users = {}
+        self._connected_users = set()
 
     @property
     def users(self) -> Set[User]:
