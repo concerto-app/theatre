@@ -1,27 +1,36 @@
-import asyncio
 import logging
 import random
 import uuid
-from asyncio import AbstractEventLoop
-from dataclasses import dataclass
-from typing import Dict, Optional, Set, Union
+from asyncio import AbstractEventLoop, Queue
+from typing import (
+    Any,
+    AsyncIterator,
+    Container,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Tuple,
+    Union,
+)
 
-from pydantic import ValidationError
 from pyee.asyncio import AsyncIOEventEmitter
 
 from theatre.constants import AVAILABLE_AVATAR_EMOJI_IDS
 from theatre.log import logger
+from theatre.models.connect import (
+    AnswerMessage,
+    ConnectedMessage,
+    DisconnectedMessage,
+    OfferMessage,
+)
 from theatre.models.data import (
     Avatar,
     Code,
     Emoji,
-    IncomingUserMessage,
-    OutgoingServerMessage,
-    OutgoingUserMessage,
+    Session,
     User,
 )
-from theatre.server.connection import Connection
-from theatre.utils import Timer
 
 
 class NotEnoughResourcesError(Exception):
@@ -38,142 +47,150 @@ class RoomLoggerAdapter(logging.LoggerAdapter):
         return f"[ {prefix} ] {msg}", kwargs
 
 
-@dataclass
-class UserInfo:
-    data: User
-    connection: Connection
+Message = Optional[Dict[str, Any]]
 
 
 class Room(AsyncIOEventEmitter):
     _code: Code
-    _users: Dict[str, UserInfo]
-    _connected_users: Set[str]
+    _users: Dict[str, User]
+    _queues: Dict[str, Queue[Message]]
 
     def __init__(self, code: Code, loop: Optional[AbstractEventLoop] = None):
         super().__init__(loop)
         self._code = code
         self._logger = RoomLoggerAdapter(logger, code=code)
         self._users = {}
-        self._connected_users = set()
+        self._queues = {}
+        self._logger.info("Room created.")
 
     @property
-    def users(self) -> Set[User]:
-        users = set()
-        for user_id in self._connected_users:
-            user_data = self.get_user_data(user_id)
-            if user_data is not None:
-                users.add(user_data)
-        return users
+    def users(self) -> List[User]:
+        return [user for user in self._users.values()]
 
-    def get_user_data(self, user_id: str) -> Optional[User]:
-        return self._users[user_id].data
-
-    async def close(self) -> None:
-        for user_info in self._users.values():
-            await user_info.connection.close()
-
-    def pick_emoji(self) -> Emoji:
-        used_ids = set(
-            [
-                user_info.data.avatar.emoji.id
-                for user_info in self._users.values()
-            ]
-        )
+    def _pick_emoji(self) -> Emoji:
+        used_ids = set([user.avatar.emoji.id for user in self._users.values()])
         free_ids = AVAILABLE_AVATAR_EMOJI_IDS - used_ids
         if len(free_ids) == 0:
             raise NotEnoughResourcesError()
         picked_id = random.choice(tuple(free_ids))
         return Emoji(id=picked_id)
 
-    def create_user(self) -> User:
+    def _create_user(self) -> User:
         user_id = uuid.uuid4().hex
-        avatar = Avatar(emoji=self.pick_emoji())
+        avatar = Avatar(emoji=self._pick_emoji())
         return User(id=user_id, avatar=avatar)
 
-    async def broadcast(self, user_id: str, data: Union[str, bytes]) -> None:
-        async def send_to_user(
-            data: Union[str, bytes], user_info: UserInfo
-        ) -> None:
-            await user_info.connection.send(data)
+    async def _broadcast_to(
+        self, message: Message, to: Union[str, Container[str]]
+    ) -> None:
+        to = {to} if isinstance(to, str) else to
+        queues = [queue for user, queue in self._queues.items() if user in to]
+        for queue in queues:
+            await queue.put(message)
 
-        user_infos = [
-            self._users.get(connected_user_id)
-            for connected_user_id in self._connected_users
-            if connected_user_id != user_id
-        ]
-        tasks = [
-            send_to_user(data, user_info)
-            for user_info in user_infos
-            if user_info is not None
-        ]
+    async def _broadcast_all(self, message: Message) -> None:
+        await self._broadcast_to(message, self._users.keys())
 
-        if len(tasks) > 0:
-            await asyncio.gather(*tasks, return_exceptions=True)
+    async def _broadcast_except(
+        self, message: Message, exception: str
+    ) -> None:
+        to = set(self._users.keys()) - {exception}
+        await self._broadcast_to(message, to)
 
-    async def handle_data(self, user_id: str, data: Union[str, bytes]) -> None:
-        try:
-            incoming_message = IncomingUserMessage.parse_raw(data)
-        except ValidationError:
+    async def _broadcast_connect(self, connected_user: User) -> None:
+        message = ConnectedMessage(user=connected_user)
+        await self._broadcast_except(
+            message.dict(),
+            connected_user.id,
+        )
+
+    async def _broadcast_disconnect(self, disconnected_user: User) -> None:
+        message = DisconnectedMessage(user=disconnected_user.id)
+        await self._broadcast_except(
+            message.dict(),
+            disconnected_user.id,
+        )
+
+    async def _signal(
+        self,
+        type: Literal["offer", "answer"],
+        from_user: str,
+        to_user: str,
+        session: Session,
+    ) -> None:
+        queue = self._queues[to_user]
+        if type == "offer":
+            message = OfferMessage(
+                from_user=from_user, to_user=to_user, session=session
+            )
+        elif type == "answer":
+            message = AnswerMessage(
+                from_user=from_user, to_user=to_user, session=session
+            )
+        else:
             return
-        outgoing_message = OutgoingUserMessage(
-            user=user_id,
-            type=incoming_message.type,
-            data=incoming_message.data,
-        )
-        data = outgoing_message.json()
-        await self.broadcast(user_id, data)
+        await queue.put(message.dict())
 
-    async def handle_disconnect(self, user_id: str) -> None:
-        outgoing_message = OutgoingServerMessage(
-            type="disconnect", data={"user": user_id}
-        )
-        data = outgoing_message.json()
-        await self.broadcast(user_id, data)
-
-    async def handle_connect(self, user_id: str) -> None:
-        outgoing_message = OutgoingServerMessage(
-            type="connect", data={"user": self.get_user_data(user_id)}
-        )
-        data = outgoing_message.json()
-        await self.broadcast(user_id, data)
-
-    def add(self, connection: Connection) -> User:
+    async def connect(self) -> Tuple[User, List[User]]:
         self._logger.info("New connection.")
 
-        user = self.create_user()
+        new_user = self._create_user()
+        other_users = list(self._users.values())
 
-        def cleanup() -> None:
-            self._connected_users.discard(user.id)
-            self._users.pop(user.id, None)
-            if len(self._users) == 0:
-                self.emit("empty")
+        self._logger.info(f"Created user {new_user.avatar.emoji}.")
 
-        async def timeout() -> None:
-            if user.id not in self._connected_users:
-                self._logger.info(
-                    f"User {user.avatar.emoji} didn't connect on time."
-                )
-                cleanup()
+        self._users[new_user.id] = new_user
+        self._queues[new_user.id] = Queue()
 
-        timer = Timer(60, timeout)
+        await self._broadcast_connect(new_user)
 
-        @connection.on("connected")
-        async def on_connected() -> None:
-            self._logger.info(f"User {user.avatar.emoji} connected.")
-            timer.cancel()
-            self._connected_users.add(user.id)
-            await self.handle_connect(user.id)
+        return new_user, other_users
 
-        @connection.on("disconnected")
-        async def on_disconnected() -> None:
-            self._logger.info(f"User {user.avatar.emoji} disconnected.")
-            await self.handle_disconnect(user.id)
-            cleanup()
+    async def disconnect(self, user: str) -> None:
+        user = self._users.get(user, None)
+        if user is None:
+            return
 
-        @connection.on("data")
-        async def on_data(message: Union[bytes, str]) -> None:
-            self._logger.info(f"User {user.avatar.emoji} sent message.")
-            await self.handle_data(user.id, message)
+        self._logger.info(f"User {user.avatar.emoji} disconnected.")
 
-        self._users[user.id] = UserInfo(data=user, connection=connection)
-        return user
+        self._queues.pop(user.id, None)
+        self._users.pop(user.id, None)
+
+        await self._broadcast_disconnect(user)
+
+        if len(self._users) == 0:
+            self.emit("empty")
+
+    async def close(self) -> None:
+        self._logger.info("Room closed.")
+        await self._broadcast_all(None)
+
+    async def make_offer(
+        self, from_user: str, to_user: str, session: Session
+    ) -> None:
+        from_user = self._users[from_user]
+        to_user = self._users[to_user]
+        self._logger.info(
+            f"Offer from {from_user.avatar.emoji} to {to_user.avatar.emoji}."
+        )
+        await self._signal("offer", from_user.id, to_user.id, session)
+
+    async def make_answer(
+        self, from_user: str, to_user: str, session: Session
+    ) -> None:
+        from_user = self._users[from_user]
+        to_user = self._users[to_user]
+        self._logger.info(
+            f"Answer from {from_user.avatar.emoji} to {to_user.avatar.emoji}."
+        )
+        await self._signal("answer", from_user.id, to_user.id, session)
+
+    async def fetch(self, user: str) -> AsyncIterator[Dict]:
+        user = self._users[user]
+        queue = self._queues[user.id]
+        while True:
+            message = await queue.get()
+            if message is None:
+                return
+            self._logger.debug(f"New message for user {user.avatar.emoji}.")
+            yield message
