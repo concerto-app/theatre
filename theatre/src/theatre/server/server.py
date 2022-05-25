@@ -1,7 +1,6 @@
-from typing import Dict, Sequence, Set, Tuple
+from typing import Dict, Sequence
 
-from theatre.models.data import Code, CodeEntry, Session, User
-from theatre.server.connection import Connection
+from theatre.models.data import Code, CodeEntry
 from theatre.server.room import Room
 from theatre.utils import FrozenModel, Timer
 
@@ -27,7 +26,7 @@ class Server:
         for room in self.rooms.values():
             await room.close()
 
-    def create_room(self, code: InternalCode) -> Room:
+    def _create_room(self, code: InternalCode) -> Room:
         room = Room(code.code())
 
         async def close() -> None:
@@ -52,14 +51,5 @@ class Server:
         code = InternalCode.new(code)
         room = self.rooms.get(code)
         if room is None:
-            room = self.create_room(code)
+            room = self._create_room(code)
         return room
-
-    async def connect(
-        self, code: Code, session: Session
-    ) -> Tuple[User, Set[User], Session]:
-        room = self.get_room(code)
-        connection = await Connection.new(session)
-        user = room.add(connection)
-        connected_users = room.users
-        return user, connected_users, connection.session
