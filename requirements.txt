@@ -1,7 +1,7 @@
 # poetry requirements, especially for CI
 CacheControl==0.12.10
 cachy==0.3.0
-certifi==2021.10.8
+certifi==2023.7.22
 cffi==1.15.0
 charset-normalizer==2.0.10
 cleo==0.8.1
